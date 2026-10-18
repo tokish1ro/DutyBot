@@ -45,9 +45,11 @@ MyUpdateHandler handler = new MyUpdateHandler();
 
 // Запускаем бота
 CancellationTokenSource cts = new CancellationTokenSource();
-bot.StartReceiving(handler, cancellationToken: cts.Token);
 
-Console.WriteLine("Бот запущен. Нажми Enter для остановки...");
-Console.ReadLine();
+// ВАЖНО: Получаем задачу (task) и ждём её выполнения через await
+var receivingTask = bot.StartReceiving(handler, cancellationToken: cts.Token);
 
-cts.Cancel();
+Console.WriteLine("🚀 Бот запущен и слушает обновления...");
+
+// Ждем завершения задачи получения обновлений (она будет жить вечно, пока сервер не перезагрузят)
+await receivingTask;
