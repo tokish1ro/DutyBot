@@ -4,10 +4,8 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Microsoft.Extensions.Configuration;
 
-// === 1. Пробуем взять токен из переменной окружения (Render) ===
 string? token = Environment.GetEnvironmentVariable("BOT_TOKEN");
 
-// === 2. Если переменной нет (локальный запуск), читаем из файла ===
 if (string.IsNullOrEmpty(token))
 {
     IConfiguration configuration = new ConfigurationBuilder()
@@ -17,17 +15,15 @@ if (string.IsNullOrEmpty(token))
     token = configuration["BotToken"];
 }
 
-// === 3. Если токена всё ещё нет — ошибка ===
 if (string.IsNullOrEmpty(token))
 {
     Console.WriteLine("❌ Ошибка: BOT_TOKEN не найден!");
     return;
 }
 
-// Создаём клиента бота
 TelegramBotClient bot = new TelegramBotClient(token);
 
-// ===== РЕГИСТРИРУЕМ МЕНЮ КОМАНД =====
+ // Рег команд - меню
 await bot.SetMyCommands(new[]{
     new BotCommand { Command = "start",   Description = " Главное меню" },
     new BotCommand { Command = "add",     Description = "➕ Добавить (/add Фамилия)" },
@@ -41,10 +37,8 @@ await bot.SetMyCommands(new[]{
     new BotCommand { Command = "remind",  Description = "🔔 Напоминания (/remind on/off)" }
 });
 
-// Создаём обработчик
 MyUpdateHandler handler = new MyUpdateHandler();
 
-// Запускаем бота
 CancellationTokenSource cts = new CancellationTokenSource();
 bot.StartReceiving(handler, cancellationToken: cts.Token);
 

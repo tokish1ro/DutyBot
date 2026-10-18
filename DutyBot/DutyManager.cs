@@ -62,10 +62,7 @@ public class DutyManager
 
     private void CheckNewDay()
     {
-        // Логика пропуска выходных/праздников может быть здесь сложной.
-        // Для простоты пока оставим как есть: индекс меняется только вручную или через команды.
-        // Если нужно авто-пропускать выходные — это отдельная большая задача.
-        // Сейчас мы делаем акцент на РУЧНОМ управлении кнопками.
+
     }
 
     // === ОСНОВНЫЕ КОМАНДЫ ===
@@ -109,8 +106,7 @@ public class DutyManager
         string temp = students[fIdx];
         students.RemoveAt(fIdx);
         students.Insert(tIdx, temp);
-        
-        // Корректировка индекса текущего дежурного, если он сместился
+
         FixAnchor(temp); 
         
         SaveData();
@@ -119,7 +115,6 @@ public class DutyManager
 
     private void FixAnchor(string anchorName)
     {
-        // Простая логика: если анкор (первый дежурный) был перемещен, обновляем индекс
         int idx = students.IndexOf(anchorName);
         if (idx >= 0) currentIndex = idx;
     }
@@ -145,11 +140,9 @@ public class DutyManager
     public string GetTodayText()
     {
         if (students.Count == 0) return "⚠️ Список пуст. Добавь людей командой /add";
-        
-        // Берем первого
+
         string first = students[currentIndex];
         
-        // Берем второго (циклически)
         int nextIdx = (currentIndex + 1) % students.Count;
         string second = students[nextIdx];
         
@@ -187,7 +180,7 @@ public class DutyManager
         var sorted = stats.OrderByDescending(x => x.Value).ToList();
         var sb = new System.Text.StringBuilder("📊 СТАТИСТИКА:\n━━━━━━━━━━━━━━\n");
         
-        foreach (var pair in sorted.Take(10)) // Топ-10
+        foreach (var pair in sorted.Take(10)) 
         {
             sb.AppendLine($"{pair.Key}: {pair.Value} раз(а)");
         }

@@ -1,9 +1,12 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using Telegram.Bot.Types.ReplyMarkups; // ВАЖНЫЙ ИМПОРТ ДЛЯ КНОПОК
+using Telegram.Bot.Types.ReplyMarkups;
 
 public class MyUpdateHandler : IUpdateHandler
 {
@@ -11,28 +14,33 @@ public class MyUpdateHandler : IUpdateHandler
 
     public async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
-        // Обработка сообщений (текст)
-        if (update.Message?.Text != null)
+        try
         {
-            await HandleMessageAsync(botClient, update.Message, cancellationToken);
+            var client = (TelegramBotClient)botClient;
+
+            if (update.Message?.Text != null)
+            {
+                await HandleMessageAsync(client, update.Message, cancellationToken);
+            }
+            else if (update.CallbackQuery != null)
+            {
+                await HandleCallbackAsync(client, update.CallbackQuery, cancellationToken);
+            }
         }
-        
-        // Обработка нажатий на кнопки (CallbackQuery)
-        else if (update.CallbackQuery != null)
+        catch (Exception ex)
         {
-            await HandleCallbackAsync(botClient, update.CallbackQuery, cancellationToken);
+            Console.WriteLine($"Ошибка обработки апдейта: {ex}");
         }
     }
 
-    private async Task HandleMessageAsync(ITelegramBotClient botClient, Message message, CancellationToken ct)
+    private async Task HandleMessageAsync(TelegramBotClient client, Message message, CancellationToken ct)
     {
         string text = message.Text!.ToLower().Trim();
-        long chatId = message.Chat.Id;
+        ChatId chatId = message.Chat.Id;
         
         string response = "";
-        ReplyMarkup? markup = null; // Переменная для кнопок
+        InlineKeyboardMarkup? markup = null;
 
-        // --- КОМАНДА START ---
         if (text.StartsWith("/start"))
         {
             response = "<b>👋 Привет!</b>\nЯ бот дежурств.\n\n" +
@@ -43,16 +51,13 @@ public class MyUpdateHandler : IUpdateHandler
                        "• /move №1 №2 — переместить\n" +
                        "• /stats — статистика";
         }
-        
-        // --- КОМАНDA TODAY (С КНОПКАМИ!) ---
         else if (text.StartsWith("/today"))
         {
             response = _dutyManager.GetTodayText();
             
-            // Создаем клавиатуру
             var keyboard = new InlineKeyboardMarkup(new[]
             {
-                new []
+                new [] 
                 {
                     InlineKeyboardButton.WithCallbackData("⬅️ Назад", "go_back"),
                     InlineKeyboardButton.WithCallbackData("➡️ Пропустить", "skip_forward")
@@ -60,8 +65,6 @@ public class MyUpdateHandler : IUpdateHandler
             });
             markup = keyboard;
         }
-        
-        // --- ДРУГИЕ КОМАНДЫ ---
         else if (text.StartsWith("/add "))
         {
             string name = text.Substring(5).Trim();
@@ -72,7 +75,7 @@ public class MyUpdateHandler : IUpdateHandler
             if (int.TryParse(text.Substring(8).Trim(), out int num))
                 response = _dutyManager.RemoveStudent(num);
             else
-                response = "❌ Введи число после /remove (например: /remove 3)";
+                response = "❌ Введи число после /remove";
         }
         else if (text.StartsWith("/move "))
         {
@@ -80,7 +83,7 @@ public class MyUpdateHandler : IUpdateHandler
             if (parts.Length >= 3 && int.TryParse(parts[1], out int from) && int.TryParse(parts[2], out int to))
                 response = _dutyManager.MoveStudent(from, to);
             else
-                response = "❌ Формат: /move ОТ КУДА (числа)";
+                response = "❌ Формат: /move ОТ КУДА";
         }
         else if (text.StartsWith("/list"))
         {
@@ -92,23 +95,22 @@ public class MyUpdateHandler : IUpdateHandler
         }
         else
         {
-            response = "❓ Не знаю такую команду. Попробуй /start";
+            response = "❓ Не знаю такую команду.";
         }
 
-        // Отправка ответа
-        await botClient.SendTextMessageAsync(
-            chatId, 
-            response, 
+        await client.SendMessage(
+            chatId: chatId, 
+            text: response, 
             parseMode: ParseMode.Html, 
-            replyMarkup: markup, // Передаем кнопки, если они есть
+            replyMarkup: markup, 
             cancellationToken: ct
         );
     }
 
-    private async Task HandleCallbackAsync(ITelegramBotClient botClient, CallbackQuery query, CancellationToken ct)
+    private async Task HandleCallbackAsync(TelegramBotClient client, CallbackQuery query, CancellationToken ct)
     {
-        string action = query.Data;
-        long chatId = query.Message!.Chat.Id;
+        string action = query.Data ?? "";
+        ChatId chatId = query.Message!.Chat.Id;
         int messageId = query.Message.MessageId;
         
         string newText = "";
@@ -118,33 +120,32 @@ public class MyUpdateHandler : IUpdateHandler
             case "go_back":
                 newText = _dutyManager.GoBack();
                 break;
-                
             case "skip_forward":
                 newText = _dutyManager.SkipForward();
                 break;
-                
             default:
                 newText = "Неизвестное действие.";
                 break;
         }
 
-        // Редактируем сообщение прямо в чате (чтобы не спамить новыми сообщениями)
-        await botClient.EditMessageTextAsync(
-            chatId, 
-            messageId, 
-            newText, 
+        await client.EditMessageText(
+            chatId: chatId,
+            messageId: messageId,
+            text: newText,
             parseMode: ParseMode.Html,
-            replyMarkup: query.Message.ReplyMarkup, // Сохраняем те же кнопки
+            replyMarkup: query.Message.ReplyMarkup as InlineKeyboardMarkup,
             cancellationToken: ct
         );
 
-        // Обязательно отвечаем на callback, чтобы убрать "часики" у пользователя
-        await botClient.AnswerCallbackQueryAsync(query.Id, cancellationToken: ct);
+        await client.AnswerCallbackQuery(
+            callbackQueryId: query.Id, 
+            cancellationToken: ct
+        );
     }
 
-    public Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+    public Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Ошибка: {exception.Message}");
+        Console.WriteLine($"Ошибка ({source}): {exception.Message}");
         return Task.CompletedTask;
     }
 }
