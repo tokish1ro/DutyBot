@@ -1,199 +1,190 @@
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
-
-public class StudentData
-{
-    public List<string> Students { get; set; } = new();
-    public int CurrentIndex { get; set; } = 0;
-}
-
-// SupaBase
-public class SupabaseRow
-{
-    public JsonElement data { get; set; }
-}
 
 public class DutyManager
 {
-    private static readonly HttpClient _httpClient = new();
-    private readonly string? _url;
-    private readonly string? _apiKey;
-    
+    private readonly HttpClient _httpClient;
+    private readonly string _url;
+    private readonly string _apiKey;
     private StudentData _cache = new();
     private bool _loaded = false;
 
     public DutyManager()
     {
+        _httpClient = new HttpClient();
         _url = Environment.GetEnvironmentVariable("SUPABASE_URL");
         _apiKey = Environment.GetEnvironmentVariable("SUPABASE_KEY");
-
-        if (string.IsNullOrEmpty(_url) || string.IsNullOrEmpty(_apiKey))
-        {
-            Console.WriteLine("❌ SUPABASE_URL или SUPABASE_KEY не заданы!");
-            return;
-        }
-
         _httpClient.DefaultRequestHeaders.Add("apikey", _apiKey);
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        
-        Task.Run(LoadFromDbAsync).Wait();
+        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_apiKey}");
     }
 
-    private async Task LoadFromDbAsync()
+    public async Task LoadFromDbAsync()
     {
         try 
         {
-            Console.WriteLine($"URL: {_url}/rest/v1/bot_state");
-            var response = await _httpClient.GetAsync($"{_url}/rest/v1/bot_state?id=eq.1&select=data");
+            var requestUrl = $"{_url}/rest/v1/bot_state?id=eq.1&select=data";
+            Console.WriteLine($"DEBUG URL: {requestUrl}");
+            
+            var response = await _httpClient.GetAsync(requestUrl);
+            var rawContent = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"DEBUG RAW RESPONSE: {rawContent}");
             
             if (!response.IsSuccessStatusCode) 
             {
-                Console.WriteLine($"Ошибка загрузки: {response.StatusCode}");
+                Console.WriteLine($"❌ Ошибка: {response.StatusCode}");
                 return;
             }
 
-            // Десериализуем ответ как список строк Supabase (в табличном виде там)
-            var rows = await response.Content.ReadFromJsonAsync<List<SupabaseRow>>();
+            if (string.IsNullOrWhiteSpace(rawContent) || rawContent == "[]")
+            {
+                Console.WriteLine("️ Пустой ответ от базы");
+                return;
+            }
+
+            var rows = JsonSerializer.Deserialize<List<SupabaseRow>>(rawContent);
             
             if (rows != null && rows.Count > 0)
             {
-                // Извлекаем поле data из первой строки
                 var dataJson = rows[0].data.GetRawText();
+                Console.WriteLine($"DEBUG DATA JSON: {dataJson}");
                 _cache = JsonSerializer.Deserialize<StudentData>(dataJson) ?? new();
                 _loaded = true;
-                Console.WriteLine($"✅ Данные загружены из Supabase. Студентов: {_cache.Students.Count}");
+                Console.WriteLine($"✅ Загружено студентов: {_cache.Students.Count}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Исключение при загрузке: {ex.Message}");
+            Console.WriteLine($" Исключение: {ex.Message}");
         }
     }
 
-    private async Task SaveToDbAsync()
+    public async Task SaveToDbAsync()
     {
-        if (!_loaded) return;
-
-        try 
+        try
         {
-            using var httpContent = JsonContent.Create(new { data = _cache });
-
-            var response = await _httpClient.PatchAsync($"{_url}/rest/v1/bot_state?id=eq.1", httpContent);
+            var data = new { data = _cache };
+            var content = new StringContent(JsonSerializer.Serialize(data), Encoding.UTF8, "application/json");
             
-            if (!response.IsSuccessStatusCode)
+            var response = await _httpClient.PatchAsync($"{_url}/rest/v1/bot_state?id=eq.1", content);
+            
+            if (response.IsSuccessStatusCode)
             {
-                string errorBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"❌ Ошибка Supabase ({response.StatusCode}): {errorBody}");
+                Console.WriteLine($"✅ Данные сохранены. Студентов: {_cache.Students.Count}");
             }
             else
             {
-                Console.WriteLine("✅ Данные успешно сохранены в Supabase.");
+                Console.WriteLine($"❌ Ошибка сохранения: {response.StatusCode}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"💥 Исключение при сохранении: {ex.Message}");
+            Console.WriteLine($" Исключение при сохранении: {ex.Message}");
         }
     }
 
-    public string AddStudent(string name)
+    public void AddStudent(string name)
     {
-        name = name.Trim();
-        if (string.IsNullOrEmpty(name)) return "❌ Имя пустое.";
-        if (_cache.Students.Contains(name)) return $"️ {name} уже есть.";
-
+        if (!_loaded)
+        {
+            Console.WriteLine("⚠️ Данные ещё не загружены");
+            return;
+        }
+        
         _cache.Students.Add(name);
-        SaveToDbAsync().Wait();
-        return $"✅ {name} добавлен.\nВсего: {_cache.Students.Count} чел.";
+        Console.WriteLine($"✅ Добавлен: {name}. Всего: {_cache.Students.Count}");
     }
 
-    public string RemoveStudent(int index)
+    public void RemoveStudent(int index)
     {
-        if (index < 1 || index > _cache.Students.Count) return $"❌ Номер вне диапазона (1-{_cache.Students.Count}).";
+        if (!_loaded) return;
         
-        string removed = _cache.Students[index - 1];
-        _cache.Students.RemoveAt(index - 1);
-        
-        if (_cache.CurrentIndex >= _cache.Students.Count && _cache.Students.Count > 0) 
-            _cache.CurrentIndex = 0;
-            
-        SaveToDbAsync().Wait();
-        return $"🗑 Удален: {removed}. Осталось: {_cache.Students.Count} чел.";
+        if (index >= 0 && index < _cache.Students.Count)
+        {
+            var removed = _cache.Students[index];
+            _cache.Students.RemoveAt(index);
+            Console.WriteLine($"✅ Удалён: {removed}");
+        }
+        else
+        {
+            Console.WriteLine("❌ Неверный номер");
+        }
     }
 
-    public string MoveStudent(int from, int to)
+    public void MoveStudent(int from, int to)
     {
-        if (from < 1 || from > _cache.Students.Count || to < 1 || to > _cache.Students.Count)
-            return "❌ Неверные позиции.";
-
-        string temp = _cache.Students[from - 1];
-        _cache.Students.RemoveAt(from - 1);
-        _cache.Students.Insert(to - 1, temp);
+        if (!_loaded) return;
         
-        FixAnchor(temp);
-        SaveToDbAsync().Wait();
-        return $"↕️ Перемещено: {temp} на позицию {to}.";
-    }
-
-    private void FixAnchor(string anchorName)
-    {
-        int idx = _cache.Students.IndexOf(anchorName);
-        if (idx >= 0) _cache.CurrentIndex = idx;
+        if (from >= 0 && from < _cache.Students.Count && to >= 0 && to < _cache.Students.Count)
+        {
+            var student = _cache.Students[from];
+            _cache.Students.RemoveAt(from);
+            _cache.Students.Insert(to, student);
+            Console.WriteLine($"✅ {student} перемещён с {from + 1} на {to + 1}");
+        }
+        else
+        {
+            Console.WriteLine("❌ Неверные номера");
+        }
     }
 
     public string GetList()
     {
-        if (_cache.Students.Count == 0) return "⚠️ Список пуст.";
+        if (!_loaded || _cache.Students.Count == 0)
+        {
+            return "⚠️ Список пуст.";
+        }
         
-        var sb = new System.Text.StringBuilder("📋 СПИСОК ГРУППЫ:\n━━━━━━━━━━━━━━\n");
+        var sb = new StringBuilder("📋 Список группы:\n\n");
         for (int i = 0; i < _cache.Students.Count; i++)
         {
-            string marker = (i == _cache.CurrentIndex) ? "🔴" : "⚪";
-            sb.AppendLine($"{marker} {i + 1}. {_cache.Students[i]}");
+            var marker = i == _cache.CurrentIndex ? "👉 " : "   ";
+            sb.AppendLine($"{marker}{i + 1}. {_cache.Students[i]}");
         }
-        sb.AppendLine("━━━━━━━━━━━━━━");
-        sb.AppendLine($"Всего: {_cache.Students.Count} чел.");
         return sb.ToString();
     }
 
-    public string GetTodayText()
+    public string GetTodayDuty()
     {
-        if (_cache.Students.Count == 0) return "️ Список пуст. Добавь людей командой /add";
+        if (!_loaded || _cache.Students.Count == 0)
+        {
+            return "⚠️ Список пуст.";
+        }
         
-        string first = _cache.Students[_cache.CurrentIndex];
-        int nextIdx = (_cache.CurrentIndex + 1) % _cache.Students.Count;
-        string second = _cache.Students[nextIdx];
-        
-        return $"<b> Дежурные сегодня:</b>\n\n1. <b>{first}</b>\n2. <b>{second}</b>\n\n<i>Нажми кнопки ниже.</i>";
+        if (_cache.CurrentIndex >= 0 && _cache.CurrentIndex < _cache.Students.Count)
+        {
+            return $"📅 Сегодня дежурит: {_cache.Students[_cache.CurrentIndex]}";
+        }
+        return "⚠️ Дежурный не назначен.";
     }
 
-    public string GoBack()
+    public void NextDuty()
     {
-        if (_cache.Students.Count <= 1) return "⚠️ Мало людей.";
+        if (!_loaded || _cache.Students.Count == 0) return;
         
-        _cache.CurrentIndex--;
-        if (_cache.CurrentIndex < 0) _cache.CurrentIndex = _cache.Students.Count - 1;
-        
-        SaveToDbAsync().Wait();
-        return GetTodayText();
+        _cache.CurrentIndex = (_cache.CurrentIndex + 1) % _cache.Students.Count;
+        Console.WriteLine($"✅ Следующий дежурный: {_cache.Students[_cache.CurrentIndex]}");
     }
 
-    public string SkipForward()
+    public void PrevDuty()
     {
-        if (_cache.Students.Count <= 1) return "⚠️ Мало людей.";
+        if (!_loaded || _cache.Students.Count == 0) return;
         
-        _cache.CurrentIndex++;
-        if (_cache.CurrentIndex >= _cache.Students.Count) _cache.CurrentIndex = 0;
-        
-        SaveToDbAsync().Wait();
-        return GetTodayText();
+        _cache.CurrentIndex = (_cache.CurrentIndex - 1 + _cache.Students.Count) % _cache.Students.Count;
+        Console.WriteLine($"✅ Предыдущий дежурный: {_cache.Students[_cache.CurrentIndex]}");
     }
-    
-    public string GetStats() => "Статистика доступна только локально (для демо).";
+
+    public int StudentCount => _cache.Students.Count;
+}
+
+public class SupabaseRow
+{
+    public int id { get; set; }
+    public JsonElement data { get; set; }
+}
+
+public class StudentData
+{
+    public List<string> Students { get; set; } = new();
+    public int CurrentIndex { get; set; } = 0;
 }
