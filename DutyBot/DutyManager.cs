@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Net.Http.Json; // ВАЖНО для JsonContent
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -10,6 +10,12 @@ public class StudentData
 {
     public List<string> Students { get; set; } = new();
     public int CurrentIndex { get; set; } = 0;
+}
+
+// SupaBase
+public class SupabaseRow
+{
+    public JsonElement data { get; set; }
 }
 
 public class DutyManager
@@ -51,13 +57,14 @@ public class DutyManager
                 return;
             }
 
-            var contentStr = await response.Content.ReadAsStringAsync();
-            var jsonDoc = JsonDocument.Parse(contentStr);
+            // Десериализуем ответ как список строк Supabase (в табличном виде там)
+            var rows = await response.Content.ReadFromJsonAsync<List<SupabaseRow>>();
             
-            if (jsonDoc.RootElement.TryGetProperty(0, out var item) && 
-                item.TryGetProperty("data", out var dataProp))
+            if (rows != null && rows.Count > 0)
             {
-                _cache = JsonSerializer.Deserialize<StudentData>(dataProp.GetRawText()) ?? new();
+                // Извлекаем поле data из первой строки
+                var dataJson = rows[0].data.GetRawText();
+                _cache = JsonSerializer.Deserialize<StudentData>(dataJson) ?? new();
                 _loaded = true;
                 Console.WriteLine($"✅ Данные загружены из Supabase. Студентов: {_cache.Students.Count}");
             }
@@ -74,8 +81,6 @@ public class DutyManager
 
         try 
         {
-            // ИСПОЛЬЗУЕМ JsonContent.Create - это нативный способ для .NET 6+
-            // Он сам сериализует объект и ставит правильные заголовки
             using var httpContent = JsonContent.Create(new { data = _cache });
 
             var response = await _httpClient.PatchAsync($"{_url}/rest/v1/bot_state?id=eq.1", httpContent);
@@ -100,7 +105,7 @@ public class DutyManager
     {
         name = name.Trim();
         if (string.IsNullOrEmpty(name)) return "❌ Имя пустое.";
-        if (_cache.Students.Contains(name)) return $"⚠️ {name} уже есть.";
+        if (_cache.Students.Contains(name)) return $"️ {name} уже есть.";
 
         _cache.Students.Add(name);
         SaveToDbAsync().Wait();
@@ -118,7 +123,7 @@ public class DutyManager
             _cache.CurrentIndex = 0;
             
         SaveToDbAsync().Wait();
-        return $" Удален: {removed}. Осталось: {_cache.Students.Count} чел.";
+        return $"🗑 Удален: {removed}. Осталось: {_cache.Students.Count} чел.";
     }
 
     public string MoveStudent(int from, int to)
@@ -148,7 +153,7 @@ public class DutyManager
         var sb = new System.Text.StringBuilder("📋 СПИСОК ГРУППЫ:\n━━━━━━━━━━━━━━\n");
         for (int i = 0; i < _cache.Students.Count; i++)
         {
-            string marker = (i == _cache.CurrentIndex) ? "🔴" : "";
+            string marker = (i == _cache.CurrentIndex) ? "🔴" : "⚪";
             sb.AppendLine($"{marker} {i + 1}. {_cache.Students[i]}");
         }
         sb.AppendLine("━━━━━━━━━━━━━━");
@@ -158,18 +163,18 @@ public class DutyManager
 
     public string GetTodayText()
     {
-        if (_cache.Students.Count == 0) return "⚠️ Список пуст. Добавь людей командой /add";
+        if (_cache.Students.Count == 0) return "️ Список пуст. Добавь людей командой /add";
         
         string first = _cache.Students[_cache.CurrentIndex];
         int nextIdx = (_cache.CurrentIndex + 1) % _cache.Students.Count;
         string second = _cache.Students[nextIdx];
         
-        return $"<b>📅 Дежурные сегодня:</b>\n\n1. <b>{first}</b>\n2. <b>{second}</b>\n\n<i>Нажми кнопки ниже.</i>";
+        return $"<b> Дежурные сегодня:</b>\n\n1. <b>{first}</b>\n2. <b>{second}</b>\n\n<i>Нажми кнопки ниже.</i>";
     }
 
     public string GoBack()
     {
-        if (_cache.Students.Count <= 1) return "️ Мало людей.";
+        if (_cache.Students.Count <= 1) return "⚠️ Мало людей.";
         
         _cache.CurrentIndex--;
         if (_cache.CurrentIndex < 0) _cache.CurrentIndex = _cache.Students.Count - 1;
