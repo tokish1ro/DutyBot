@@ -49,6 +49,7 @@ public class DutyManager
     {
         try 
         {
+            Console.WriteLine($"URL: {_url}/rest/v1/bot_state");
             var response = await _httpClient.GetAsync($"{_url}/rest/v1/bot_state?id=eq.1&select=data");
             
             if (!response.IsSuccessStatusCode) 
