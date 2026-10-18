@@ -1,59 +1,76 @@
-﻿using Telegram.Bot;
+﻿using System.Net;
+using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Microsoft.Extensions.Configuration;
 
-// === 1. Пробуем взять токен из переменной окружения (Render) ===
+// === Токен ===
 string? token = Environment.GetEnvironmentVariable("BOT_TOKEN");
 
-// === 2. Если переменной нет (локальный запуск), читаем из файла ===
 if (string.IsNullOrEmpty(token))
 {
     IConfiguration configuration = new ConfigurationBuilder()
-        .AddJsonFile("appsettings.json", optional: true) // optional: true важно!
+        .AddJsonFile("appsettings.json", optional: true)
         .Build();
     
     token = configuration["BotToken"];
 }
 
-// === 3. Если токена всё ещё нет — ошибка ===
 if (string.IsNullOrEmpty(token))
 {
-    Console.WriteLine("❌ Ошибка: BOT_TOKEN не найден ни в ENV, ни в файле!");
+    Console.WriteLine("❌ Ошибка: BOT_TOKEN не найден!");
     return;
 }
 
-// Создаём клиента бота
+// === Создаём клиента ===
 TelegramBotClient bot = new TelegramBotClient(token);
 
-// ===== РЕГИСТРИРУЕМ МЕНЮ КОМАНД =====
+// === Регистрируем команды ===
 await bot.SetMyCommands(new[]{
-    new BotCommand { Command = "start",   Description = " Главное меню с кнопками" },
-    new BotCommand { Command = "add",     Description = "➕ Добавить одногруппника (/add Фамилия)" },
+    new BotCommand { Command = "start",   Description = " Главное меню" },
+    new BotCommand { Command = "add",     Description = "➕ Добавить (/add Фамилия)" },
     new BotCommand { Command = "list",    Description = "📋 Список группы" },
     new BotCommand { Command = "today",   Description = "📅 Кто сегодня дежурит" },
     new BotCommand { Command = "next",    Description = "➡️ Следующее дежурство" },
-    new BotCommand { Command = "remove",  Description = "🗑 Удалить по номеру (/remove 7)" },
-    new BotCommand { Command = "move",    Description = "↕️ Переставить (/move 7 6)" },
-    new BotCommand { Command = "stats",   Description = "📊 Статистика дежурств" },
+    new BotCommand { Command = "remove",  Description = "🗑 Удалить (/remove №)" },
+    new BotCommand { Command = "move",    Description = "↕️ Переставить (/move №1 №2)" },
+    new BotCommand { Command = "stats",   Description = "📊 Статистика" },
     new BotCommand { Command = "replace", Description = "🔄 Замена (/replace Иванов Петров)" },
-    new BotCommand { Command = "remind",  Description = "🔔 Напоминания (/remind on или off)" }
+    new BotCommand { Command = "remind",  Description = "🔔 Напоминания (/remind on/off)" }
 });
 
-// Создаём обработчик
+// === Запускаем обработчик ===
 MyUpdateHandler handler = new MyUpdateHandler();
-
-// Запускаем бота
 CancellationTokenSource cts = new CancellationTokenSource();
-
-// ВАЖНО: Просто запускаем процесс получения сообщений.
-// В новых версиях библиотеки StartReceiving может быть void или возвращать Task, 
-// но нам не нужно его сохранять в переменную, чтобы избежать ошибок компиляции.
 bot.StartReceiving(handler, cancellationToken: cts.Token);
 
-Console.WriteLine("🚀 Бот запущен и слушает обновления...");
+Console.WriteLine("🚀 Бот запущен!");
 
-// Ждем бесконечно. Это стандартный способ остановить консольное приложение от закрытия.
-// Программа будет висеть здесь, пока её не убьет сервер (или Ctrl+C локально).
-// Timeout.Infinite означает "ждать вечно".
+// === Мини HTTP сервер для Render (health check) ===
+var listener = new HttpListener();
+int port = int.Parse(Environment.GetEnvironmentVariable("PORT") ?? "10000");
+listener.Prefixes.Add($"http://*:{port}/");
+listener.Start();
+
+Console.WriteLine($"✅ Health check сервер запущен на порту {port}");
+
+// Запускаем прослушивание в отдельном потоке
+_ = Task.Run(async () =>
+{
+    while (!cts.IsCancellationRequested)
+    {
+        try
+        {
+            var context = await listener.GetContextAsync();
+            // Отвечаем "OK" на любой запрос
+            byte[] buffer = System.Text.Encoding.UTF8.GetBytes("OK");
+            context.Response.ContentLength64 = buffer.Length;
+            await context.Response.OutputStream.WriteAsync(buffer);
+            context.Response.Close();
+        }
+        catch { /* Игнорируем ошибки */ }
+    }
+});
+
+// Держим программу живой
 await Task.Delay(Timeout.Infinite, cts.Token);
