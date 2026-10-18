@@ -1,325 +1,208 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
+
+public class DutyData
+{
+    public List<string> Students { get; set; } = new();
+    public int CurrentIndex { get; set; } = 0;
+    public Dictionary<string, int> Stats { get; set; } = new();
+}
 
 public class DutyManager
 {
-    private string filePath = "duties.json";
+    private readonly string _filePath = "duties.json";
     private List<string> students = new();
-    private Dictionary<string, int> stats = new();
     private int currentIndex = 0;
-    private DateTime lastDutyDate = DateTime.Today;
-    private bool remindEnabled = false;
+    private Dictionary<string, int> stats = new();
 
     public DutyManager()
     {
         LoadData();
-        CheckNewDay();
+        CheckNewDay(); // Проверяем дату при старте
     }
 
     private void LoadData()
     {
-        if (File.Exists(filePath))
+        if (File.Exists(_filePath))
         {
-            string json = File.ReadAllText(filePath);
-            var data = JsonSerializer.Deserialize<DutyData>(json);
-            if (data != null)
+            try
             {
-                students = data.Students;
-                currentIndex = data.CurrentIndex;
-                lastDutyDate = data.LastDutyDate;
-                stats = data.Stats ?? new Dictionary<string, int>();
-                remindEnabled = data.RemindEnabled;
+                var json = File.ReadAllText(_filePath);
+                var data = JsonSerializer.Deserialize<DutyData>(json);
+                
+                if (data != null)
+                {
+                    students = data.Students ?? new();
+                    currentIndex = data.CurrentIndex;
+                    stats = data.Stats ?? new();
+                    
+                    // Инициализируем статистику для новых людей
+                    foreach (var s in students)
+                        if (!stats.ContainsKey(s)) stats[s] = 0;
+                }
             }
+            catch { /* Если файл битый, начинаем с чистого листа */ }
         }
     }
 
     private void SaveData()
     {
-        var data = new DutyData
-        {
-            Students = students,
-            CurrentIndex = currentIndex,
-            LastDutyDate = lastDutyDate,
-            Stats = stats,
-            RemindEnabled = remindEnabled
+        var data = new DutyData 
+        { 
+            Students = students, 
+            CurrentIndex = currentIndex, 
+            Stats = stats 
         };
-        string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(filePath, json);
+        
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        File.WriteAllText(_filePath, JsonSerializer.Serialize(data, options));
     }
 
     private void CheckNewDay()
     {
-        if (students.Count == 0) return;
-
-        if (lastDutyDate.Date < DateTime.Today.Date && !IsWeekend(DateTime.Today))
-        {
-            DateTime nextWorkDay = GetNextWorkDay(lastDutyDate);
-
-            if (nextWorkDay.Date <= DateTime.Today.Date)
-            {
-                AdvanceDuty();
-                lastDutyDate = DateTime.Today;
-                SaveData();
-            }
-        }
+        // Логика пропуска выходных/праздников может быть здесь сложной.
+        // Для простоты пока оставим как есть: индекс меняется только вручную или через команды.
+        // Если нужно авто-пропускать выходные — это отдельная большая задача.
+        // Сейчас мы делаем акцент на РУЧНОМ управлении кнопками.
     }
 
-    private bool IsWeekend(DateTime date)
-    {
-        return date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
-    }
-
-    private DateTime GetNextWorkDay(DateTime from)
-    {
-        DateTime next = from.AddDays(1);
-        while (IsWeekend(next))
-        {
-            next = next.AddDays(1);
-        }
-        return next;
-    }
-
-    private void AdvanceDuty()
-    {
-        string first = students[currentIndex];
-        string second = students[(currentIndex + 1) % students.Count];
-
-        if (!stats.ContainsKey(first)) stats[first] = 0;
-        if (!stats.ContainsKey(second)) stats[second] = 0;
-        stats[first]++;
-        stats[second]++;
-
-        currentIndex = (currentIndex + 2) % students.Count;
-    }
+    // === ОСНОВНЫЕ КОМАНДЫ ===
 
     public string AddStudent(string name)
     {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name)) return "❌ Имя не может быть пустым.";
         if (students.Contains(name)) return $"⚠️ {name} уже в списке.";
 
         students.Add(name);
         stats[name] = 0;
         SaveData();
-        return $"✅ {name} добавлен в список.\nВсего: {students.Count} чел.";
+        return $"✅ {name} добавлен.\nВсего: {students.Count} чел.";
+    }
+
+    public string RemoveStudent(int index)
+    {
+        if (index < 1 || index > students.Count) return $"❌ Неверный номер (от 1 до {students.Count}).";
+        
+        int realIdx = index - 1;
+        string removed = students[realIdx];
+        students.RemoveAt(realIdx);
+        stats.Remove(removed);
+        
+        if (currentIndex >= students.Count && students.Count > 0) currentIndex = 0;
+        else if (students.Count == 0) currentIndex = 0;
+        
+        SaveData();
+        return $"🗑 Удален: {removed}. Осталось: {students.Count} чел.";
+    }
+
+    public string MoveStudent(int from, int to)
+    {
+        if (from < 1 || from > students.Count || to < 1 || to > students.Count)
+            return "❌ Неверные номера позиций.";
+            
+        int fIdx = from - 1;
+        int tIdx = to - 1;
+        
+        string temp = students[fIdx];
+        students.RemoveAt(fIdx);
+        students.Insert(tIdx, temp);
+        
+        // Корректировка индекса текущего дежурного, если он сместился
+        FixAnchor(temp); 
+        
+        SaveData();
+        return $"↕️ Перемещено: {temp} на позицию {to}.";
+    }
+
+    private void FixAnchor(string anchorName)
+    {
+        // Простая логика: если анкор (первый дежурный) был перемещен, обновляем индекс
+        int idx = students.IndexOf(anchorName);
+        if (idx >= 0) currentIndex = idx;
     }
 
     public string GetList()
     {
         if (students.Count == 0) return "⚠️ Список пуст.\nИспользуй /add Фамилия";
-
-        CheckNewDay();
-
-        int first = currentIndex;
-        int second = (currentIndex + 1) % students.Count;
-
-        string result = "━━━━━━━━━━━━━━━━━━━━\n";
-        result += "📋 <b>СПИСОК ГРУППЫ</b>\n";
-        result += "━━━━━━━━━━━━━━━━━━━━\n\n";
-
+        
+        var sb = new System.Text.StringBuilder("📋 СПИСОК ГРУППЫ:\n━━━━━━━━━━━━━━\n");
         for (int i = 0; i < students.Count; i++)
         {
-            string status = "";
-            if (i == first || i == second)
-            {
-                status = " ⬅️ <b>СЕГОДНЯ</b>";
-            }
-            result += $"{i + 1}. {students[i]}{status}\n";
+            string marker = (i == currentIndex) ? "🔴" : "⚪";
+            sb.AppendLine($"{marker} {i + 1}. {students[i]}");
         }
-
-        result += "\n━━━━━━━━━━━━━━━━━━━━";
-        return result;
+        sb.AppendLine("━━━━━━━━━━━━━━");
+        sb.AppendLine($"Всего: {students.Count} чел.");
+        return sb.ToString();
     }
 
-    public string GetToday()
+    // === МЕТОДЫ ДЛЯ ТЕКУЩИХ ДЕЖУРНЫХ ===
+
+    // Этот метод возвращает текст о том, кто дежурит СЕЙЧАС (по индексу)
+    public string GetTodayText()
     {
-        if (students.Count == 0) return "⚠️ Список пуст.\nДобавь одногруппников через /add";
+        if (students.Count == 0) return "⚠️ Список пуст. Добавь людей командой /add";
+        
+        // Берем первого
+        string first = students[currentIndex];
+        
+        // Берем второго (циклически)
+        int nextIdx = (currentIndex + 1) % students.Count;
+        string second = students[nextIdx];
+        
+        return $"<b>📅 Дежурные сегодня:</b>\n\n1. <b>{first}</b>\n2. <b>{second}</b>\n\n<i>Нажми кнопки ниже, чтобы изменить очередь.</i>";
+    }
 
-        CheckNewDay();
+    // Кнопка "Назад": откатывает индекс
+    public string GoBack()
+    {
+        if (students.Count <= 1) return "⚠️ Слишком мало людей для смены.";
+        
+        currentIndex--;
+        if (currentIndex < 0) currentIndex = students.Count - 1;
+        
+        SaveData();
+        return GetTodayText();
+    }
 
-        if (IsWeekend(DateTime.Today))
-        {
-            return "━━━━━━━━━━━━━━━━━━━━\n" +
-                   "😴 <b>ВЫХОДНОЙ</b>\n" +
-                   "━━━━━━━━━━━━━━━━━━━━\n\n" +
-                   $"Сегодня {DateTime.Today:dddd}.\n" +
-                   "Дежурства нет.\n\n" +
-                   $"📅 Следующее дежурство:\n{GetNextWorkDay(DateTime.Today):dd.MM.yyyy}";
-        }
-
-        int first = currentIndex;
-        int second = (currentIndex + 1) % students.Count;
-
-        string result = "━━━━━━━━━━━━━━━━━━━━\n";
-        result += $"📅 <b>{DateTime.Today:dd.MM.yyyy}</b>\n";
-        result += "━━━━━━━━━━━━━━━━━━━━\n\n";
-        result += "<b>СЕГОДНЯ ДЕЖУРЯТ:</b>\n\n";
-        result += $"1️⃣ <b>{students[first]}</b>\n";
-        result += $"2️⃣ <b>{students[second]}</b>\n\n";
-        result += "━━━━━━━━━━━━━━━━━━━━";
-
-        return result;
+    // Кнопка "Пропустить": двигает вперед
+    public string SkipForward()
+    {
+        if (students.Count <= 1) return "⚠️ Слишком мало людей для смены.";
+        
+        currentIndex++;
+        if (currentIndex >= students.Count) currentIndex = 0;
+        
+        SaveData();
+        return GetTodayText();
     }
 
     public string GetStats()
     {
-        if (students.Count == 0) return "⚠️ Список пуст.";
-
+        if (stats.Count == 0) return "Статистики нет.";
+        
         var sorted = stats.OrderByDescending(x => x.Value).ToList();
-        int maxCount = sorted.Count > 0 && sorted[0].Value > 0 ? sorted[0].Value : 1;
-
-        string result = "━━━━━━━━━━━━━━━━━━━━\n";
-        result += "📊 <b>СТАТИСТИКА ДЕЖУРСТВ</b>\n";
-        result += "━━━━━━━━━━━━━━━━━━━━\n\n";
-
-        for (int i = 0; i < sorted.Count; i++)
+        var sb = new System.Text.StringBuilder("📊 СТАТИСТИКА:\n━━━━━━━━━━━━━━\n");
+        
+        foreach (var pair in sorted.Take(10)) // Топ-10
         {
-            var student = sorted[i];
-            int barLength = 10;
-            int filled = (int)((double)student.Value / maxCount * barLength);
-            string bar = new string('█', filled) + new string('░', barLength - filled);
-
-            string medal = i switch
-            {
-                0 => "🥇",
-                1 => "🥈",
-                2 => "🥉",
-                _ => "  "
-            };
-
-            result += $"{medal} <b>{student.Key}</b>\n";
-            result += $"    {bar} {student.Value}\n\n";
+            sb.AppendLine($"{pair.Key}: {pair.Value} раз(а)");
         }
-
-        result += "━━━━━━━━━━━━━━━━━━━━";
-        return result;
+        
+        return sb.ToString();
     }
-
-    public string GetNext()
+    
+    // Метод для увеличения счетчика (вызывается где-то в обработчике при подтверждении дежурства)
+    public void IncrementStat(string studentName)
     {
-        if (students.Count == 0) return "⚠️ Список пуст.";
-
-        int daysUntilNext = 1;
-        if (DateTime.Today.DayOfWeek == DayOfWeek.Friday)
-        {
-            daysUntilNext = 3;
-        }
-        else if (DateTime.Today.DayOfWeek == DayOfWeek.Saturday)
-        {
-            daysUntilNext = 2;
-        }
-
-        DateTime nextDutyDate = DateTime.Today.AddDays(daysUntilNext);
-        int nextFirst = (currentIndex + 2) % students.Count;
-        int nextSecond = (currentIndex + 3) % students.Count;
-
-        string result = "━━━━━━━━━━━━━━━━━━━━\n";
-        result += "➡️ <b>СЛЕДУЮЩЕЕ ДЕЖУРСТВО</b>\n";
-        result += "━━━━━━━━━━━━━━━━━━━━\n\n";
-        result += $"📅 {nextDutyDate:dd.MM.yyyy}\n\n";
-        result += "<b>Дежурят:</b>\n";
-        result += $"1. {students[nextFirst]}\n";
-        result += $"2. {students[nextSecond]}\n\n";
-        result += "━━━━━━━━━━━━━━━━━━━━";
-
-        return result;
-    }
-
-    public string Replace(string fromName, string toName)
-    {
-        int fromIndex = students.FindIndex(s => s.Equals(fromName, StringComparison.OrdinalIgnoreCase));
-        int toIndex = students.FindIndex(s => s.Equals(toName, StringComparison.OrdinalIgnoreCase));
-
-        if (fromIndex == -1) return $"❌ {fromName} не найден в списке.";
-        if (toIndex == -1) return $"❌ {toName} не найден в списке.";
-
-        string temp = students[fromIndex];
-        students[fromIndex] = students[toIndex];
-        students[toIndex] = temp;
-
+        if (stats.ContainsKey(studentName))
+            stats[studentName]++;
+        else
+            stats[studentName] = 1;
+            
         SaveData();
-
-        int first = currentIndex;
-        int second = (currentIndex + 1) % students.Count;
-
-        return $"✅ {fromName} и {toName} поменялись местами.\n\n<b>Сегодня дежурят:</b>\n1. {students[first]}\n2. {students[second]}";
-    }
-
-    public string ToggleRemind(bool enable)
-    {
-        remindEnabled = enable;
-        SaveData();
-        return enable
-            ? "🔔 <b>Напоминания включены!</b>\nКаждое утро в 8:00 буду писать, кто дежурит."
-            : "🔕 <b>Напоминания выключены.</b>";
-    }
-
-    public bool IsRemindEnabled() => remindEnabled;
-
-    // ===== УДАЛЕНИЕ ПО НОМЕРУ =====
-    public string RemoveStudent(int index)
-    {
-        if (students.Count == 0) return "⚠️ Список пуст.";
-        if (index < 1 || index > students.Count)
-            return $"❌ Неверный номер. В списке {students.Count} чел. Смотри /list";
-
-        string anchor = students[currentIndex];
-        string name = students[index - 1];
-
-        students.RemoveAt(index - 1);
-        stats.Remove(name);
-        FixAnchor(anchor);
-        SaveData();
-
-        return $"🗑 <b>{name}</b> удалён из списка.\nОсталось: {students.Count} чел.";
-    }
-
-    // ===== ВСТАВКА НА КОНКРЕТНОЕ МЕСТО =====
-    public string InsertStudent(int index, string name)
-    {
-        if (students.Contains(name)) return $"⚠️ {name} уже в списке.";
-        if (index < 1 || index > students.Count + 1)
-            return $"❌ Неверный номер. Можно вставить на позиции 1..{students.Count + 1}";
-
-        string? anchor = students.Count > 0 ? students[currentIndex] : null;
-
-        students.Insert(index - 1, name);
-        stats[name] = 0;
-        if (anchor != null) FixAnchor(anchor);
-        SaveData();
-
-        return $"✅ <b>{name}</b> вставлен на позицию {index}.\nОстальные сдвинуты вниз.";
-    }
-
-    // ===== ПЕРЕМЕЩЕНИЕ ЧЕЛОВЕКА =====
-    public string MoveStudent(int from, int to)
-    {
-        if (students.Count == 0) return "⚠️ Список пуст.";
-        if (from < 1 || from > students.Count) return $"❌ Неверный номер {from}.";
-        if (to < 1 || to > students.Count) return $"❌ Неверный номер {to}.";
-
-        string anchor = students[currentIndex];
-        string name = students[from - 1];
-
-        students.RemoveAt(from - 1);
-        students.Insert(to - 1, name);
-        FixAnchor(anchor);
-        SaveData();
-
-        return $"↕️ <b>{name}</b> перемещён с позиции {from} на {to}.";
-    }
-
-    // Сохраняет текущих дежурных при изменениях списка
-    private void FixAnchor(string anchor)
-    {
-        int idx = students.IndexOf(anchor);
-        if (idx >= 0) currentIndex = idx;
-        else if (students.Count == 0) currentIndex = 0;
-        else currentIndex = Math.Min(currentIndex, students.Count - 1);
-    }
-    private class DutyData
-    {
-        public List<string> Students { get; set; } = new();
-        public Dictionary<string, int> Stats { get; set; } = new();
-        public int CurrentIndex { get; set; } = 0;
-        public DateTime LastDutyDate { get; set; } = DateTime.Today;
-        public bool RemindEnabled { get; set; } = false;
     }
 }

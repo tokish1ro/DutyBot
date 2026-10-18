@@ -4,9 +4,10 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Microsoft.Extensions.Configuration;
 
-// === Токен ===
+// === 1. Пробуем взять токен из переменной окружения (Render) ===
 string? token = Environment.GetEnvironmentVariable("BOT_TOKEN");
 
+// === 2. Если переменной нет (локальный запуск), читаем из файла ===
 if (string.IsNullOrEmpty(token))
 {
     IConfiguration configuration = new ConfigurationBuilder()
@@ -16,21 +17,22 @@ if (string.IsNullOrEmpty(token))
     token = configuration["BotToken"];
 }
 
+// === 3. Если токена всё ещё нет — ошибка ===
 if (string.IsNullOrEmpty(token))
 {
     Console.WriteLine("❌ Ошибка: BOT_TOKEN не найден!");
     return;
 }
 
-// === Создаём клиента ===
+// Создаём клиента бота
 TelegramBotClient bot = new TelegramBotClient(token);
 
-// === Регистрируем команды ===
+// ===== РЕГИСТРИРУЕМ МЕНЮ КОМАНД =====
 await bot.SetMyCommands(new[]{
     new BotCommand { Command = "start",   Description = " Главное меню" },
     new BotCommand { Command = "add",     Description = "➕ Добавить (/add Фамилия)" },
     new BotCommand { Command = "list",    Description = "📋 Список группы" },
-    new BotCommand { Command = "today",   Description = "📅 Кто сегодня дежурит" },
+    new BotCommand { Command = "today",   Description = "📅 Кто дежурит (+кнопки)" },
     new BotCommand { Command = "next",    Description = "➡️ Следующее дежурство" },
     new BotCommand { Command = "remove",  Description = "🗑 Удалить (/remove №)" },
     new BotCommand { Command = "move",    Description = "↕️ Переставить (/move №1 №2)" },
@@ -39,14 +41,16 @@ await bot.SetMyCommands(new[]{
     new BotCommand { Command = "remind",  Description = "🔔 Напоминания (/remind on/off)" }
 });
 
-// === Запускаем обработчик ===
+// Создаём обработчик
 MyUpdateHandler handler = new MyUpdateHandler();
+
+// Запускаем бота
 CancellationTokenSource cts = new CancellationTokenSource();
 bot.StartReceiving(handler, cancellationToken: cts.Token);
 
 Console.WriteLine("🚀 Бот запущен!");
 
-// === Мини HTTP сервер для Render (health check) ===
+// === MINI HTTP SERVER FOR RENDER HEALTH CHECK ===
 var listener = new HttpListener();
 int port = int.Parse(Environment.GetEnvironmentVariable("PORT") ?? "10000");
 listener.Prefixes.Add($"http://*:{port}/");
@@ -54,7 +58,6 @@ listener.Start();
 
 Console.WriteLine($"✅ Health check сервер запущен на порту {port}");
 
-// Запускаем прослушивание в отдельном потоке
 _ = Task.Run(async () =>
 {
     while (!cts.IsCancellationRequested)
@@ -62,13 +65,12 @@ _ = Task.Run(async () =>
         try
         {
             var context = await listener.GetContextAsync();
-            // Отвечаем "OK" на любой запрос
             byte[] buffer = System.Text.Encoding.UTF8.GetBytes("OK");
             context.Response.ContentLength64 = buffer.Length;
             await context.Response.OutputStream.WriteAsync(buffer);
             context.Response.Close();
         }
-        catch { /* Игнорируем ошибки */ }
+        catch { /* Ignore errors */ }
     }
 });
 
