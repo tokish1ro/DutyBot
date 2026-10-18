@@ -3,17 +3,30 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Microsoft.Extensions.Configuration;
 
-// Загружаем токен из файла настроек
-IConfiguration configuration = new ConfigurationBuilder()
-    .AddJsonFile("appsettings.json")
-    .Build();
+// === 1. Пробуем взять токен из переменной окружения (Render) ===
+string? token = Environment.GetEnvironmentVariable("BOT_TOKEN");
 
-string token = configuration["BotToken"]!;
+// === 2. Если переменной нет (локальный запуск), читаем из файла ===
+if (string.IsNullOrEmpty(token))
+{
+    IConfiguration configuration = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true) // optional: true важно!
+        .Build();
+    
+    token = configuration["BotToken"];
+}
+
+// === 3. Если токена всё ещё нет — ошибка ===
+if (string.IsNullOrEmpty(token))
+{
+    Console.WriteLine("❌ Ошибка: BOT_TOKEN не найден ни в ENV, ни в файле!");
+    return;
+}
 
 // Создаём клиента бота
 TelegramBotClient bot = new TelegramBotClient(token);
 
-// ===== РЕГИСТРИРУЕМ МЕНЮ КОМАНД (подсказки при вводе "/") =====
+// ===== РЕГИСТРИРУЕМ МЕНЮ КОМАНД =====
 await bot.SetMyCommands(new[]{
     new BotCommand { Command = "start",   Description = " Главное меню с кнопками" },
     new BotCommand { Command = "add",     Description = "➕ Добавить одногруппника (/add Фамилия)" },
