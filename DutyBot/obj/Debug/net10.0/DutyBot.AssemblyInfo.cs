@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DutyBot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c58f0dc77bbd7a5cee29db2a7613d84f20e491d1")]
 [assembly: System.Reflection.AssemblyProductAttribute("DutyBot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DutyBot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
