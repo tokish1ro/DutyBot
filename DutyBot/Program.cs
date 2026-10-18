@@ -46,10 +46,14 @@ MyUpdateHandler handler = new MyUpdateHandler();
 // Запускаем бота
 CancellationTokenSource cts = new CancellationTokenSource();
 
-// ВАЖНО: Получаем задачу (task) и ждём её выполнения через await
-var receivingTask = bot.StartReceiving(handler, cancellationToken: cts.Token);
+// ВАЖНО: Просто запускаем процесс получения сообщений.
+// В новых версиях библиотеки StartReceiving может быть void или возвращать Task, 
+// но нам не нужно его сохранять в переменную, чтобы избежать ошибок компиляции.
+bot.StartReceiving(handler, cancellationToken: cts.Token);
 
 Console.WriteLine("🚀 Бот запущен и слушает обновления...");
 
-// Ждем завершения задачи получения обновлений (она будет жить вечно, пока сервер не перезагрузят)
-await receivingTask;
+// Ждем бесконечно. Это стандартный способ остановить консольное приложение от закрытия.
+// Программа будет висеть здесь, пока её не убьет сервер (или Ctrl+C локально).
+// Timeout.Infinite означает "ждать вечно".
+await Task.Delay(Timeout.Infinite, cts.Token);
