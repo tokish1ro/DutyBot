@@ -23,9 +23,8 @@ if (string.IsNullOrEmpty(token))
 
 TelegramBotClient bot = new TelegramBotClient(token);
 
- // Рег команд - меню
 await bot.SetMyCommands(new[]{
-    new BotCommand { Command = "start",   Description = " Главное меню" },
+    new BotCommand { Command = "start",   Description = "🏠 Главное меню" },
     new BotCommand { Command = "add",     Description = "➕ Добавить (/add Фамилия)" },
     new BotCommand { Command = "list",    Description = "📋 Список группы" },
     new BotCommand { Command = "today",   Description = "📅 Кто дежурит (+кнопки)" },
@@ -39,12 +38,14 @@ await bot.SetMyCommands(new[]{
 
 MyUpdateHandler handler = new MyUpdateHandler();
 
+Console.WriteLine("⏳ Загрузка данных из базы...");
+await handler.InitializeAsync();
+
 CancellationTokenSource cts = new CancellationTokenSource();
 bot.StartReceiving(handler, cancellationToken: cts.Token);
 
 Console.WriteLine("🚀 Бот запущен!");
 
-// === MINI HTTP SERVER FOR RENDER HEALTH CHECK ===
 var listener = new HttpListener();
 int port = int.Parse(Environment.GetEnvironmentVariable("PORT") ?? "10000");
 listener.Prefixes.Add($"http://*:{port}/");
@@ -64,9 +65,8 @@ _ = Task.Run(async () =>
             await context.Response.OutputStream.WriteAsync(buffer);
             context.Response.Close();
         }
-        catch { /* Ignore errors */ }
+        catch { }
     }
 });
 
-// Держим программу живой
 await Task.Delay(Timeout.Infinite, cts.Token);

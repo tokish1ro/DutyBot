@@ -12,6 +12,11 @@ public class MyUpdateHandler : IUpdateHandler
 {
     private readonly DutyManager _dutyManager = new();
 
+    public async Task InitializeAsync()
+    {
+        await _dutyManager.LoadFromDbAsync();
+    }
+
     public async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
         try
