@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 public class DutyManager
 {
@@ -202,6 +203,9 @@ public class SupabaseRow
 
 public class StudentData
 {
+    [JsonPropertyName("students")]
     public List<string> Students { get; set; } = new();
+    
+    [JsonPropertyName("currentIndex")]
     public int CurrentIndex { get; set; } = 0;
 }
