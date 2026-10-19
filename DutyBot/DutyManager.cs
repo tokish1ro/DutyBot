@@ -18,19 +18,17 @@ public class DutyManager
         _apiKey = Environment.GetEnvironmentVariable("SUPABASE_KEY");
         _httpClient.DefaultRequestHeaders.Add("apikey", _apiKey);
         _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_apiKey}");
-        _httpClient.DefaultRequestHeaders.Add("Prefer", "return=representation");
     }
+
+    private string Esc(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     public async Task LoadFromDbAsync()
     {
         try 
         {
             var requestUrl = $"{_url}/rest/v1/bot_state?id=eq.1&select=data";
-            Console.WriteLine($"DEBUG URL: {requestUrl}");
-            
             var response = await _httpClient.GetAsync(requestUrl);
             var rawContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"DEBUG RAW: {rawContent}");
             
             if (!response.IsSuccessStatusCode) 
             {
@@ -49,7 +47,6 @@ public class DutyManager
             if (rows != null && rows.Count > 0)
             {
                 var dataJson = rows[0].data.GetRawText();
-                Console.WriteLine($"DEBUG DATA: {dataJson}");
                 _cache = JsonSerializer.Deserialize<StudentData>(dataJson) ?? new();
                 _loaded = true;
                 Console.WriteLine($"✅ Загружено студентов: {_cache.Students.Count}");
@@ -72,14 +69,9 @@ public class DutyManager
             var response = await _httpClient.PatchAsync($"{_url}/rest/v1/bot_state?id=eq.1", content);
             
             if (response.IsSuccessStatusCode)
-            {
                 Console.WriteLine($"✅ Сохранено. Студентов: {_cache.Students.Count}");
-            }
             else
-            {
-                var err = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"❌ Ошибка сохранения: {response.StatusCode} - {err}");
-            }
+                Console.WriteLine($"❌ Ошибка сохранения: {response.StatusCode}");
         }
         catch (Exception ex)
         {
@@ -89,15 +81,11 @@ public class DutyManager
 
     public string AddStudent(string name)
     {
-        if (!_loaded)
-        {
-            Console.WriteLine("⚠️ Данные не загружены");
-            return "⚠️ База ещё не загружена, попробуй через 30 секунд.";
-        }
+        if (!_loaded) return "⚠️ База ещё не загружена, попробуй через минуту.";
         
         _cache.Students.Add(name);
         SaveToDbAsync().GetAwaiter().GetResult();
-        return $"✅ {name} добавлен. Всего: {_cache.Students.Count}";
+        return $"✅ <b>{Esc(name)}</b> добавлен!\n\n👥 Теперь в списке: <b>{_cache.Students.Count}</b> чел.";
     }
 
     public string RemoveStudent(int number)
@@ -112,9 +100,9 @@ public class DutyManager
             if (_cache.CurrentIndex >= _cache.Students.Count && _cache.Students.Count > 0)
                 _cache.CurrentIndex = 0;
             SaveToDbAsync().GetAwaiter().GetResult();
-            return $"✅ {removed} удалён. Осталось: {_cache.Students.Count}";
+            return $"🗑 <b>{Esc(removed)}</b> удалён из списка.\n\n👥 Осталось: <b>{_cache.Students.Count}</b> чел.";
         }
-        return "❌ Неверный номер.";
+        return $"❌ Неверный номер. В списке {_cache.Students.Count} чел.";
     }
 
     public string MoveStudent(int from, int to)
@@ -130,26 +118,35 @@ public class DutyManager
             _cache.Students.RemoveAt(fromIdx);
             _cache.Students.Insert(toIdx, student);
             SaveToDbAsync().GetAwaiter().GetResult();
-            return $"✅ {student} перемещён с {from} на {to}";
+            return $"↕️ <b>{Esc(student)}</b> перемещён: {from} → {to}";
         }
         return "❌ Неверные номера.";
     }
 
     public string GetList()
     {
-        if (!_loaded) return "️ База не загружена.";
+        if (!_loaded) return "⚠️ База не загружена.";
         
         if (_cache.Students.Count == 0)
-        {
-            return "⚠️ Список пуст.";
-        }
+            return "⚠️ <b>Список пуст.</b>\nДобавь студентов: /add Фамилия";
         
-        var sb = new StringBuilder(" Список группы:\n\n");
+        var sb = new StringBuilder();
+        sb.AppendLine("📋 <b>СПИСОК ГРУППЫ</b>");
+        sb.AppendLine("━━━━━━━━━━━━━━━━━━");
+        sb.AppendLine();
+        
         for (int i = 0; i < _cache.Students.Count; i++)
         {
-            var marker = i == _cache.CurrentIndex ? "👉 " : "   ";
-            sb.AppendLine($"{marker}{i + 1}. {_cache.Students[i]}");
+            if (i == _cache.CurrentIndex)
+                sb.AppendLine($"👉 <b>{i + 1}. {Esc(_cache.Students[i])}</b> 🟢");
+            else
+                sb.AppendLine($"     {i + 1}. {Esc(_cache.Students[i])}");
         }
+        
+        sb.AppendLine();
+        sb.AppendLine("━━━━━━━━━━━━━━━━━━");
+        sb.AppendLine($"👥 Всего: <b>{_cache.Students.Count}</b>  |  🟢 Дежурит: <b>#{_cache.CurrentIndex + 1}</b>");
+        
         return sb.ToString();
     }
 
@@ -158,31 +155,27 @@ public class DutyManager
         if (!_loaded) return "⚠️ База не загружена.";
         
         if (_cache.Students.Count == 0)
-        {
-            return "⚠️ Список пуст. Добавь студентов через /add.";
-        }
+            return "⚠️ <b>Список пуст.</b>\nДобавь студентов: /add Фамилия";
         
-        if (_cache.CurrentIndex >= 0 && _cache.CurrentIndex < _cache.Students.Count)
-        {
-            return $"📅 Сегодня дежурит:\n\n<b>{_cache.Students[_cache.CurrentIndex]}</b>\n\nПозиция: {_cache.CurrentIndex + 1} из {_cache.Students.Count}";
-        }
-        return "️ Дежурный не назначен.";
+        var name = _cache.Students[_cache.CurrentIndex];
+        return $"📅 <b>ДЕЖУРСТВО</b>\n━━━━━━━━━━━━━━━━━━\n\n🟢 Сегодня дежурит:\n👉 <b>{Esc(name)}</b>\n\n📊 Позиция: {_cache.CurrentIndex + 1} из {_cache.Students.Count}\n\n<i>Листай кнопками ниже 👇</i>";
     }
 
     public string GetStats()
     {
         if (!_loaded) return "⚠️ База не загружена.";
         
-        return $"📊 Статистика:\n\nВсего студентов: {_cache.Students.Count}\nТекущий дежурный: #{_cache.CurrentIndex + 1}";
+        var name = _cache.Students.Count > 0 ? _cache.Students[_cache.CurrentIndex] : "—";
+        return $"📊 <b>СТАТИСТИКА</b>\n━━━━━━━━━━━━━━━━━━\n\n👥 Всего студентов: <b>{_cache.Students.Count}</b>\n🟢 Дежурит сейчас: <b>{Esc(name)}</b>\n💾 Хранилище: Supabase (облако)\n🤖 Хостинг: Render (24/7)";
     }
 
     public string GoBack()
     {
-        if (!_loaded || _cache.Students.Count == 0) return "️ Список пуст.";
+        if (!_loaded || _cache.Students.Count == 0) return "⚠️ Список пуст.";
         
         _cache.CurrentIndex = (_cache.CurrentIndex - 1 + _cache.Students.Count) % _cache.Students.Count;
         SaveToDbAsync().GetAwaiter().GetResult();
-        return $"⬅️ Предыдущий дежурный: <b>{_cache.Students[_cache.CurrentIndex]}</b>";
+        return $"⬅️ <b>Предыдущий</b>\n━━━━━━━━━━━━━━━━━━\n\n🟢 Теперь дежурит:\n👉 <b>{Esc(_cache.Students[_cache.CurrentIndex])}</b>\n\n📊 Позиция: {_cache.CurrentIndex + 1} из {_cache.Students.Count}";
     }
 
     public string SkipForward()
@@ -191,7 +184,7 @@ public class DutyManager
         
         _cache.CurrentIndex = (_cache.CurrentIndex + 1) % _cache.Students.Count;
         SaveToDbAsync().GetAwaiter().GetResult();
-        return $"➡️ Следующий дежурный: <b>{_cache.Students[_cache.CurrentIndex]}</b>";
+        return $"➡️ <b>Следующий</b>\n━━━━━━━━━━━━━━━━━━\n\n🟢 Теперь дежурит:\n👉 <b>{Esc(_cache.Students[_cache.CurrentIndex])}</b>\n\n📊 Позиция: {_cache.CurrentIndex + 1} из {_cache.Students.Count}";
     }
 }
 
